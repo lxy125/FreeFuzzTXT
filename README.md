@@ -62,12 +62,20 @@ if __name__ == "__main__":
 
         TorchDatabase.database_config(host, port, mongo_cfg["torch_database"])
 
+        # 获取数据库中实际存在的API列表
+        available_apis = []
         for api_name in TorchDatabase.get_api_list():
+            if api_name in TorchDatabase.DB.list_collection_names():
+                available_apis.append(api_name)
+            else:
+                print(f"Skipping {api_name}: not found in database")
+
+        for api_name in available_apis:
             print(api_name)
             if need_skip_torch(api_name):
                 continue
             try:
-                res = subprocess.run(["python3", "FreeFuzz_api.py", config_name, "torch", api_name], shell=False,
+                res = subprocess.run(["python", "FreeFuzz_api.py", config_name, "torch", api_name], shell=True,
                                      timeout=100)
             except subprocess.TimeoutExpired:
                 dump_data(f"{api_name}\n", join(torch_output_dir, "timeout.txt"), "a")
@@ -489,15 +497,20 @@ class Database:
         else:
             return select_data[idx_name], True
 
-
     def get_rand_record(self, api_name):
+        # 检查该 API 是否存在于数据库中
+        if api_name not in self.DB.list_collection_names():
+            print(f"NO SUCH API: {api_name}")
+            return None
+
         record = self.DB[api_name].aggregate([{"$sample": {"size": 1}}])
         if not record.alive:
-            print(f"NO SUCH API: {api_name}")
-            assert(0)
+            print(f"NO RECORDS FOR API: {api_name}")
+            return None
+
         record = record.next()
         record.pop("_id")
-        assert("_id" not in record.keys())
+        assert ("_id" not in record.keys())
         return record
     
     def get_all_records(self, api_name):
@@ -2267,6 +2280,40 @@ each_api_run_times = 1000
 
 
 ================================================================================
+FILE: src\config\fixed_demo.conf
+================================================================================
+[general]
+libs = torch
+
+[mongodb]
+host = 127.0.0.1
+port = 27017
+torch_database = freefuzz-torch
+tf_database = freefuzz-tf
+
+[output]
+torch_output = torch-output
+tf_output = tf-output
+
+[torch-output]
+torch-output = torch-output
+tf_output = tf-output
+
+[oracle]
+enable_crash = true
+enable_cuda = true
+enable_precision = true
+float_difference_bound = 1e-2
+max_time_bound = 10
+time_thresold = 1e-3
+
+[mutation]
+enable_value_mutation = true
+enable_type_mutation = true
+enable_db_mutation = true
+each_api_run_times = 10
+
+================================================================================
 FILE: src\constants\enum.py
 ================================================================================
 
@@ -3220,6 +3267,357 @@ if __name__ == "__main__":
     loadAPIs(join("..", "data", f"{target}_APIdef.txt"))
     write_API_signature(target)
     write_similarity(target)
+
+
+================================================================================
+FILE: src\torch-output\temp.py
+================================================================================
+results = dict()
+import torch
+import time
+arg_1_tensor = torch.rand([128, 480, 8, 8], dtype=torch.float16)
+arg_1 = arg_1_tensor.clone()
+arg_2_tensor = torch.rand([128, 480, 8, 8], dtype=torch.float16)
+arg_2 = arg_2_tensor.clone()
+start = time.time()
+results["time_low"] = torch.add(arg_1,arg_2,)
+results["time_low"] = time.time() - start
+arg_1 = arg_1_tensor.clone().type(torch.float32)
+arg_2 = arg_2_tensor.clone().type(torch.float32)
+start = time.time()
+results["time_high"] = torch.add(arg_1,arg_2,)
+results["time_high"] = time.time() - start
+
+print(results)
+
+
+================================================================================
+FILE: src\torch-output\crash-oracle\fail\torch.add\1.py
+================================================================================
+import torch
+arg_1_tensor = torch.randint(-128,16,[3, 5], dtype=torch.int8)
+arg_1 = arg_1_tensor.clone()
+arg_2_tensor = torch.rand([4, 1], dtype=torch.float32)
+arg_2 = arg_2_tensor.clone()
+arg_3 = 10
+res = torch.add(arg_1,arg_2,alpha=arg_3,)
+
+
+================================================================================
+FILE: src\torch-output\crash-oracle\fail\torch.add\2.py
+================================================================================
+import torch
+arg_1_tensor = torch.randint(-32768,256,[2, 2, 2], dtype=torch.int64)
+arg_1 = arg_1_tensor.clone()
+arg_2_tensor = torch.rand([64, 3, 144, 144], dtype=torch.float32)
+arg_2 = arg_2_tensor.clone()
+res = torch.add(arg_1,arg_2,)
+
+
+================================================================================
+FILE: src\torch-output\crash-oracle\fail\torch.add\3.py
+================================================================================
+import torch
+arg_1_tensor = torch.rand([128, 480, np.int64(1), 8], dtype=torch.float32)
+arg_1 = arg_1_tensor.clone()
+arg_2_tensor = torch.rand([128, 480, 8, 8], dtype=torch.float32)
+arg_2 = arg_2_tensor.clone()
+res = torch.add(arg_1,arg_2,)
+
+
+================================================================================
+FILE: src\torch-output\crash-oracle\success\torch.add\1.py
+================================================================================
+import torch
+arg_1_tensor = torch.rand([26, 128, 144, 144], dtype=torch.float32)
+arg_1 = arg_1_tensor.clone()
+arg_2_tensor = torch.rand([26, 128, 144, 144], dtype=torch.float32)
+arg_2 = arg_2_tensor.clone()
+res = torch.add(arg_1,arg_2,)
+
+
+================================================================================
+FILE: src\torch-output\crash-oracle\success\torch.add\2.py
+================================================================================
+import torch
+arg_1_tensor = torch.rand([5, 5, 5], dtype=torch.float64)
+arg_1 = arg_1_tensor.clone()
+arg_2 = 19.14
+res = torch.add(arg_1,arg_2,)
+
+
+================================================================================
+FILE: src\torch-output\crash-oracle\success\torch.add\3.py
+================================================================================
+import torch
+arg_1_tensor = torch.rand([80, 480, 8, 8], dtype=torch.float32)
+arg_1 = arg_1_tensor.clone()
+arg_2_tensor = torch.rand([80, 480, 8, 8], dtype=torch.float32)
+arg_2 = arg_2_tensor.clone()
+res = torch.add(arg_1,arg_2,)
+
+
+================================================================================
+FILE: src\torch-output\crash-oracle\success\torch.add\4.py
+================================================================================
+import torch
+arg_1_tensor = torch.rand([], dtype=torch.float64)
+arg_1 = arg_1_tensor.clone()
+arg_2_tensor = torch.rand([], dtype=torch.float64)
+arg_2 = arg_2_tensor.clone()
+res = torch.add(arg_1,arg_2,)
+
+
+================================================================================
+FILE: src\torch-output\crash-oracle\success\torch.add\5.py
+================================================================================
+import torch
+arg_1_tensor = torch.rand([], dtype=torch.float64)
+arg_1 = arg_1_tensor.clone()
+arg_2_tensor = torch.rand([], dtype=torch.float64)
+arg_2 = arg_2_tensor.clone()
+res = torch.add(arg_1,arg_2,)
+
+
+================================================================================
+FILE: src\torch-output\crash-oracle\success\torch.add\6.py
+================================================================================
+import torch
+arg_1_tensor = torch.rand([1], dtype=torch.float64)
+arg_1 = arg_1_tensor.clone()
+arg_2_tensor = torch.rand([], dtype=torch.complex64)
+arg_2 = arg_2_tensor.clone()
+res = torch.add(arg_1,arg_2,)
+
+
+================================================================================
+FILE: src\torch-output\crash-oracle\success\torch.add\7.py
+================================================================================
+import torch
+arg_1_tensor = torch.rand([128, 480, 8, 8], dtype=torch.float32)
+arg_1 = arg_1_tensor.clone()
+arg_2_tensor = torch.rand([128, 480, 8, 8], dtype=torch.float32)
+arg_2 = arg_2_tensor.clone()
+res = torch.add(arg_1,arg_2,)
+
+
+================================================================================
+FILE: src\torch-output\precision-oracle\fail\torch.add\1.py
+================================================================================
+results = dict()
+import torch
+import time
+arg_1_tensor = torch.randint(-4,16,[3, 5], dtype=torch.int8)
+arg_1 = arg_1_tensor.clone()
+arg_2_tensor = torch.rand([4, 1], dtype=torch.float16)
+arg_2 = arg_2_tensor.clone()
+arg_3 = 10
+start = time.time()
+results["time_low"] = torch.add(arg_1,arg_2,alpha=arg_3,)
+results["time_low"] = time.time() - start
+arg_1 = arg_1_tensor.clone().type(torch.int8)
+arg_2 = arg_2_tensor.clone().type(torch.float32)
+start = time.time()
+results["time_high"] = torch.add(arg_1,arg_2,alpha=arg_3,)
+results["time_high"] = time.time() - start
+
+print(results)
+
+
+================================================================================
+FILE: src\torch-output\precision-oracle\fail\torch.add\2.py
+================================================================================
+results = dict()
+import torch
+import time
+arg_1_tensor = torch.randint(-4,32,[2, 2, 2], dtype=torch.int8)
+arg_1 = arg_1_tensor.clone()
+arg_2_tensor = torch.rand([64, 3, 144, 144], dtype=torch.float16)
+arg_2 = arg_2_tensor.clone()
+start = time.time()
+results["time_low"] = torch.add(arg_1,arg_2,)
+results["time_low"] = time.time() - start
+arg_1 = arg_1_tensor.clone().type(torch.int64)
+arg_2 = arg_2_tensor.clone().type(torch.float32)
+start = time.time()
+results["time_high"] = torch.add(arg_1,arg_2,)
+results["time_high"] = time.time() - start
+
+print(results)
+
+
+================================================================================
+FILE: src\torch-output\precision-oracle\fail\torch.add\3.py
+================================================================================
+results = dict()
+import torch
+import time
+arg_1_tensor = torch.rand([128, 480, np.int64(1), 8], dtype=torch.float16)
+arg_1 = arg_1_tensor.clone()
+arg_2_tensor = torch.rand([128, 480, 8, 8], dtype=torch.float16)
+arg_2 = arg_2_tensor.clone()
+start = time.time()
+results["time_low"] = torch.add(arg_1,arg_2,)
+results["time_low"] = time.time() - start
+arg_1 = arg_1_tensor.clone().type(torch.float32)
+arg_2 = arg_2_tensor.clone().type(torch.float32)
+start = time.time()
+results["time_high"] = torch.add(arg_1,arg_2,)
+results["time_high"] = time.time() - start
+
+print(results)
+
+
+================================================================================
+FILE: src\torch-output\precision-oracle\success\torch.add\1.py
+================================================================================
+results = dict()
+import torch
+import time
+arg_1_tensor = torch.rand([26, 128, 144, 144], dtype=torch.float16)
+arg_1 = arg_1_tensor.clone()
+arg_2_tensor = torch.rand([26, 128, 144, 144], dtype=torch.float16)
+arg_2 = arg_2_tensor.clone()
+start = time.time()
+results["time_low"] = torch.add(arg_1,arg_2,)
+results["time_low"] = time.time() - start
+arg_1 = arg_1_tensor.clone().type(torch.float32)
+arg_2 = arg_2_tensor.clone().type(torch.float32)
+start = time.time()
+results["time_high"] = torch.add(arg_1,arg_2,)
+results["time_high"] = time.time() - start
+
+print(results)
+
+
+================================================================================
+FILE: src\torch-output\precision-oracle\success\torch.add\2.py
+================================================================================
+results = dict()
+import torch
+import time
+arg_1_tensor = torch.rand([5, 5, 5], dtype=torch.float16)
+arg_1 = arg_1_tensor.clone()
+arg_2 = 19.14
+start = time.time()
+results["time_low"] = torch.add(arg_1,arg_2,)
+results["time_low"] = time.time() - start
+arg_1 = arg_1_tensor.clone().type(torch.float64)
+start = time.time()
+results["time_high"] = torch.add(arg_1,arg_2,)
+results["time_high"] = time.time() - start
+
+print(results)
+
+
+================================================================================
+FILE: src\torch-output\precision-oracle\success\torch.add\3.py
+================================================================================
+results = dict()
+import torch
+import time
+arg_1_tensor = torch.rand([80, 480, 8, 8], dtype=torch.float16)
+arg_1 = arg_1_tensor.clone()
+arg_2_tensor = torch.rand([80, 480, 8, 8], dtype=torch.float16)
+arg_2 = arg_2_tensor.clone()
+start = time.time()
+results["time_low"] = torch.add(arg_1,arg_2,)
+results["time_low"] = time.time() - start
+arg_1 = arg_1_tensor.clone().type(torch.float32)
+arg_2 = arg_2_tensor.clone().type(torch.float32)
+start = time.time()
+results["time_high"] = torch.add(arg_1,arg_2,)
+results["time_high"] = time.time() - start
+
+print(results)
+
+
+================================================================================
+FILE: src\torch-output\precision-oracle\success\torch.add\4.py
+================================================================================
+results = dict()
+import torch
+import time
+arg_1_tensor = torch.rand([], dtype=torch.float16)
+arg_1 = arg_1_tensor.clone()
+arg_2_tensor = torch.rand([], dtype=torch.float16)
+arg_2 = arg_2_tensor.clone()
+start = time.time()
+results["time_low"] = torch.add(arg_1,arg_2,)
+results["time_low"] = time.time() - start
+arg_1 = arg_1_tensor.clone().type(torch.float64)
+arg_2 = arg_2_tensor.clone().type(torch.float64)
+start = time.time()
+results["time_high"] = torch.add(arg_1,arg_2,)
+results["time_high"] = time.time() - start
+
+print(results)
+
+
+================================================================================
+FILE: src\torch-output\precision-oracle\success\torch.add\5.py
+================================================================================
+results = dict()
+import torch
+import time
+arg_1_tensor = torch.rand([], dtype=torch.float16)
+arg_1 = arg_1_tensor.clone()
+arg_2_tensor = torch.rand([], dtype=torch.float16)
+arg_2 = arg_2_tensor.clone()
+start = time.time()
+results["time_low"] = torch.add(arg_1,arg_2,)
+results["time_low"] = time.time() - start
+arg_1 = arg_1_tensor.clone().type(torch.float64)
+arg_2 = arg_2_tensor.clone().type(torch.float64)
+start = time.time()
+results["time_high"] = torch.add(arg_1,arg_2,)
+results["time_high"] = time.time() - start
+
+print(results)
+
+
+================================================================================
+FILE: src\torch-output\precision-oracle\success\torch.add\6.py
+================================================================================
+results = dict()
+import torch
+import time
+arg_1_tensor = torch.rand([1], dtype=torch.float16)
+arg_1 = arg_1_tensor.clone()
+arg_2_tensor = torch.rand([], dtype=torch.complex32)
+arg_2 = arg_2_tensor.clone()
+start = time.time()
+results["time_low"] = torch.add(arg_1,arg_2,)
+results["time_low"] = time.time() - start
+arg_1 = arg_1_tensor.clone().type(torch.float64)
+arg_2 = arg_2_tensor.clone().type(torch.complex64)
+start = time.time()
+results["time_high"] = torch.add(arg_1,arg_2,)
+results["time_high"] = time.time() - start
+
+print(results)
+
+
+================================================================================
+FILE: src\torch-output\precision-oracle\success\torch.add\7.py
+================================================================================
+results = dict()
+import torch
+import time
+arg_1_tensor = torch.rand([128, 480, 8, 8], dtype=torch.float16)
+arg_1 = arg_1_tensor.clone()
+arg_2_tensor = torch.rand([128, 480, 8, 8], dtype=torch.float16)
+arg_2 = arg_2_tensor.clone()
+start = time.time()
+results["time_low"] = torch.add(arg_1,arg_2,)
+results["time_low"] = time.time() - start
+arg_1 = arg_1_tensor.clone().type(torch.float32)
+arg_2 = arg_2_tensor.clone().type(torch.float32)
+start = time.time()
+results["time_high"] = torch.add(arg_1,arg_2,)
+results["time_high"] = time.time() - start
+
+print(results)
 
 
 ================================================================================
