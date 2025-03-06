@@ -2189,6 +2189,12 @@ tf_database = freefuzz-tf
 
 [output]
 # output directory for pytorch
+torch_output = torch-output
+# output directory for tensorflow
+tf_output = tf-output
+
+[torch-output]
+# output directory for pytorch
 torch-output = torch-output
 # output directory for tensorflow
 tf_output = tf-output
@@ -2201,7 +2207,7 @@ enable_cuda = true
 # enable precision oracle
 enable_precision = true
 # float difference bound: if |a-b| > bound, a is different than b
-float_difference_bound = 1e-2
+float_difference_bound = 1e-5
 # max time bound: if time(low_precision) > bound * time(high_precision),
 # it will be considered as a potential bug
 max_time_bound = 10
